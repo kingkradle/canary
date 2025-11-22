@@ -1,51 +1,139 @@
-# Vulnerability Detection Database Schema
+# Double-Agent Detection Database Schema (v2)
 
 ## Purpose
-Logs detected vulnerabilities from web security scanning, tracking what was found, where, when, and by whom.
+Tracks AI agent detection data including sessions, individual requests, behavioral analysis scores, and honey token triggers.
 
 ## Tables
 
-### `vulnerability_logs` (main table)
-Primary log of all detected vulnerabilities.
+### `sessions` (main tracking table)
+Groups requests by IP + User-Agent with behavioral profiling.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | UUID | Yes (auto) | Primary key, auto-generated |
-| `base_url` | TEXT | Yes | Website URL (must start with http:// or https://) |
-| `path` | TEXT | No | Specific path on the website (optional) |
-| `vulnerability_type` | TEXT | Yes | Type of vulnerability detected |
-| `timestamp` | TIMESTAMPTZ | Yes (auto) | When vulnerability was detected (defaults to NOW()) |
-| `attack_id` | TEXT | No | Identifier for the attacker (IP address, session ID, etc.) |
+| `id` | UUID | Yes (auto) | Primary key |
+| `ip` | TEXT | Yes | Client IP address |
+| `user_agent` | TEXT | Yes | Client User-Agent string |
+| `start_time` | TIMESTAMPTZ | Yes (auto) | Session start time |
+| `end_time` | TIMESTAMPTZ | No | Session end time |
+| `last_activity` | TIMESTAMPTZ | Yes (auto) | Last request timestamp |
+| `request_count` | INT | Yes | Number of requests in session |
+| `endpoints_called` | JSONB | Yes | Array of unique endpoints accessed |
+| `avg_request_interval_ms` | FLOAT | No | Average time between requests |
+| `interval_variance` | FLOAT | No | Coefficient of variation for timing |
+| `looked_at_docs` | BOOLEAN | Yes | Hit /docs or /documentation |
+| `tried_openapi` | BOOLEAN | Yes | Hit /openapi or /swagger.json |
+| `tried_admin` | BOOLEAN | Yes | Hit /admin or /dashboard |
+| `tried_internal` | BOOLEAN | Yes | Hit /internal, /debug, /.env |
+| `systematic_probing` | BOOLEAN | Yes | Accessed >5 unique endpoints |
+| `sql_injection_attempted` | BOOLEAN | Yes | SQL patterns detected |
+| `used_honey_token` | BOOLEAN | Yes | Used a fake credential |
+| `methods_used` | JSONB | Yes | Array of HTTP methods used |
+| `agent_likeness_score` | INT | Yes | Score 0-100 |
+| `classification` | TEXT | Yes | 'unknown', 'human', 'scraper', 'ai_agent' |
+| `classification_reasons` | JSONB | Yes | Array of scoring reasons |
 
-**Indexes:** `base_url`, `vulnerability_type`, `timestamp DESC`, `attack_id` (partial)
+**Constraint:** `UNIQUE (ip, user_agent)` - one session per IP+UA combo
 
-### `vulnerability_types` (reference table)
-Catalog of vulnerability types with metadata.
+**Indexes:** `ip`, `last_activity DESC`, `classification`, `agent_likeness_score DESC`, `start_time DESC`
+
+### `requests` (individual request logs)
+Full metadata for each HTTP request.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `vulnerability_type` | TEXT | Yes | Primary key, name of vulnerability |
-| `difficulty` | INTEGER | No | Exploitation difficulty level |
+| `id` | UUID | Yes (auto) | Primary key |
+| `session_id` | UUID | Yes (FK) | References sessions(id) |
+| `timestamp` | TIMESTAMPTZ | Yes (auto) | Request timestamp |
+| `ip` | TEXT | Yes | Client IP |
+| `user_agent` | TEXT | Yes | Client User-Agent |
+| `method` | TEXT | Yes | HTTP method (GET, POST, etc.) |
+| `path` | TEXT | Yes | Request path |
+| `query_params` | JSONB | No | URL query parameters |
+| `body` | JSONB | No | Request body |
+| `headers` | JSONB | No | Request headers (sanitized) |
+| `response_status` | INT | No | HTTP response code |
+| `response_time_ms` | INT | No | Server response time |
+| `api_key_status` | TEXT | No | 'correct', 'wrong', 'none' |
+| `api_key_used` | TEXT | No | The API key value if provided |
+| `sql_injection_detected` | BOOLEAN | Yes | SQL pattern match |
+| `bot_user_agent_detected` | BOOLEAN | Yes | Bot signature in UA |
+| `technique_id` | TEXT | No | MITRE ATT&CK technique |
+| `vulnerability_type` | TEXT | No | Classification label |
 
-## Key Behaviors
+**Indexes:** `session_id`, `timestamp DESC`, `path`, `ip`, `method`, `technique_id`
 
-**Auto-upsert vulnerability types:** When inserting a log with a new `vulnerability_type`, a corresponding entry is automatically created in `vulnerability_types` with `difficulty = NULL`. You can update the difficulty later.
+### `honey_tokens` (fake credentials)
+Tracks bait credentials and their usage.
 
-**Row Level Security (RLS):**
-- Authenticated users can read both tables and insert into `vulnerability_logs`
-- Service role has full access to both tables
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | UUID | Yes (auto) | Primary key |
+| `token_type` | TEXT | Yes | 'api_key', 'jwt', 'aws_key', 'github_token' |
+| `token_value` | TEXT | Yes | The fake credential value |
+| `created_at` | TIMESTAMPTZ | Yes (auto) | When token was created |
+| `triggered` | BOOLEAN | Yes | Whether token was used |
+| `triggered_at` | TIMESTAMPTZ | No | When token was first used |
+| `triggered_by_ip` | TEXT | No | IP that used the token |
+| `triggered_by_session` | UUID | No (FK) | Session that used the token |
 
-## Usage Example
+**Constraint:** `UNIQUE (token_value)`
+
+**Indexes:** `token_value`, `triggered`
+
+## Views
+
+### `ai_agent_sessions`
+Quick view of all sessions classified as AI agents.
+
+### `session_stats`
+Aggregate statistics grouped by classification.
+
+## Classification Thresholds
+
+| Score Range | Classification | Description |
+|-------------|----------------|-------------|
+| >= 70 | `ai_agent` | Sophisticated automated probing |
+| 40-69 | `scraper` | Simple automated tool |
+| < 40 | `human` | Irregular browsing patterns |
+
+## Scoring Factors
+
+| Factor | Points | Trigger |
+|--------|--------|---------|
+| Documentation first | +20 | /docs or /openapi in first 3 requests |
+| Systematic probing | +25 | >5 unique endpoints |
+| Admin probing | +15 | /admin, /debug, /internal access |
+| SQL injection | +25 | SQL patterns in params/body |
+| Bot User-Agent | +15 | Known bot signatures |
+| Multiple methods | +15 | >2 HTTP methods used |
+| Honey token | +30 | Used a fake credential |
+| High diversity | +10 | >70% unique endpoints |
+| Regular intervals | +25 | Low timing variance (<0.3 CV) |
+
+## Row Level Security
+
+- Authenticated users: read access to all tables
+- Service role: full access to all tables
+
+## Usage Examples
 
 ```sql
--- Insert a new vulnerability log
-INSERT INTO vulnerability_logs (base_url, path, vulnerability_type, attack_id)
-VALUES ('https://example.com', '/admin', 'SQL_INJECTION', '192.168.1.1');
+-- Get all AI agent sessions
+SELECT * FROM ai_agent_sessions;
 
--- The vulnerability_type 'SQL_INJECTION' is automatically created if it doesn't exist
+-- Get classification breakdown
+SELECT * FROM session_stats;
 
--- Later, update the difficulty
-UPDATE vulnerability_types 
-SET difficulty = 7 
-WHERE vulnerability_type = 'SQL_INJECTION';
+-- Find sessions that used honey tokens
+SELECT * FROM sessions WHERE used_honey_token = true;
+
+-- Get requests with SQL injection attempts
+SELECT * FROM requests WHERE sql_injection_detected = true;
+
+-- Find triggered honey tokens
+SELECT * FROM honey_tokens WHERE triggered = true;
 ```
+
+## Migration from v1
+
+The v2 schema replaces `vulnerability_logs` and `vulnerability_types` with the new `sessions`, `requests`, and `honey_tokens` tables. Run `supabase-schema-v2.sql` to create the new schema.

@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **honeypot website** for the def/acc hackathon in London. It serves two purposes:
+This is a **Double-Agent honeypot** for the def/acc hackathon in London. It serves two purposes:
 1. A public-facing hackathon event website with information about the event
-2. A security honeypot that logs unauthorized API access attempts to a Supabase database
+2. An AI agent detection honeypot that classifies visitors as Human, Scraper, or AI Agent
 
-The honeypot detects and logs attempts to access `/api/*` endpoints, tracking whether attackers use valid/invalid API keys or no authentication. All attempts are logged to Supabase with MITRE ATT&CK technique mappings.
+The honeypot uses behavioral analysis and a point-based scoring system to detect and classify autonomous AI agents probing the system. All attempts are logged to Supabase with MITRE ATT&CK technique mappings.
 
 ## Development Commands
 
@@ -42,38 +42,120 @@ The dev server runs at http://localhost:3000
 ```
 app/
   api/
-    [...slug]/route.ts     # Catch-all honeypot API route
+    [...slug]/route.ts     # Catch-all honeypot API route with detection
   components/              # React components (Navbar, AnimatedCounter, LoginButton)
   page.tsx                 # Main hackathon landing page
   layout.tsx               # Root layout with fonts and metadata
   globals.css              # Global styles and Tailwind imports
 
 lib/
+  detection.ts             # Core detection engine (scoring, classification, analysis)
   honeypot-config.ts       # Fake API key configuration (honeypot bait)
-  honeypot-utils.ts        # API key validation and Supabase logging logic
+  honeypot-utils.ts        # Legacy API key validation (deprecated)
   supabase.ts              # Supabase client configuration
 ```
 
-### Honeypot Architecture
+## Detection System Architecture
 
-**How it works:**
-1. `lib/honeypot-config.ts` exports a fake API key (`sk_afsldkfjslkjdfghsoiearhgf`) as bait
-2. Any request to `/api/*` is caught by `app/api/[...slug]/route.ts`
-3. The catch-all route handler:
-   - Checks headers for API keys using `checkApiKey()` from `lib/honeypot-utils.ts`
-   - Logs the attempt to Supabase using `logHoneypotTrigger()`
-   - Returns appropriate HTTP responses (200 for correct key, 401 for wrong/missing)
-4. All attempts are logged to the `vulnerability_logs` table with:
-   - `vulnerability_type`: One of `admin-page-access-correct-api-key`, `admin-page-access-incorrect-api-key`, or `admin-page-access-no-api-key`
-   - `technique_id`: MITRE ATT&CK technique (T1078, T1552, or T1190)
-   - `attacker_id`: IP address from headers
-   - `session_id`: Generated from IP + timestamp
+### Core Detection Flow
 
-**Database schema** (see `schema.md` for full details):
-- `vulnerability_logs`: Main logging table with columns: `id`, `base_url`, `vulnerability_type`, `technique_id`, `timestamp`, `attacker_id`, `session_id`
-- `vulnerability_types`: Reference table for vulnerability metadata
+```
+Incoming Request → Metadata Extraction → Session Grouping → Behavior Analysis → Classification
+                         ↓                    ↓                   ↓                 ↓
+                    IP, UA, Path,       10-min timeout       Score 0-100      human/scraper/ai_agent
+                    Method, Body        IP + User-Agent      8+ indicators
+```
 
-### Environment Variables
+### Agent-Likeness Scoring Algorithm
+
+The detection engine (`lib/detection.ts`) uses a point-based heuristic system:
+
+| Detection Factor | Points | What It Detects |
+|-----------------|--------|-----------------|
+| Documentation access first | +20 | Agents reading /docs, /openapi before probing |
+| Systematic probing (>5 endpoints) | +25 | Methodical API exploration |
+| Admin/internal endpoint access | +15 | Privilege escalation attempts |
+| SQL injection patterns | +25 | Automated vulnerability scanning |
+| Bot-like User-Agent | +15 | Known bot signatures |
+| Multiple HTTP methods (>2) | +15 | Comprehensive API testing |
+| Honey token usage | +30 | Credential harvesting and reuse |
+| High endpoint diversity | +10 | Exploring many different endpoints |
+| Regular request intervals | +25 | Automated timing patterns |
+
+### Classification Thresholds
+
+- **Score >= 70** → `ai_agent` (sophisticated automated probing)
+- **Score 40-69** → `scraper` (simple automated tool)
+- **Score < 40** → `human` (irregular browsing)
+
+### Detection Signals
+
+**SQL Injection Detection** - Regex patterns scanned in query params and body:
+- `SELECT`, `DROP`, `INSERT`, `UPDATE`, `DELETE` statements
+- Comment injection (`'--`, `/*`, `*/`)
+- Tautologies (`1=1`, `' OR '`)
+- `UNION SELECT`, time-based (`SLEEP`, `WAITFOR DELAY`)
+
+**Bot User-Agent Detection** - Checks for:
+- `bot`, `crawler`, `spider`, `scraper`
+- `python`, `axios`, `curl`, `wget`
+- `gpt`, `claude`, `openai`, `anthropic`, `langchain`
+- `selenium`, `puppeteer`, `playwright`, `headless`
+
+**Path Classification**:
+- Docs paths: `/docs`, `/documentation`, `/api-docs`, `/swagger`
+- OpenAPI paths: `/openapi`, `/openapi.json`, `/swagger.json`
+- Admin paths: `/admin`, `/dashboard`, `/internal`, `/debug`
+- Internal paths: `/shell`, `/exec`, `/eval`, `/.env`, `/config`
+
+### Session Management
+
+Sessions are grouped by **IP + User-Agent** with a **10-minute timeout**:
+- Requests from the same IP+UA within 10 minutes belong to the same session
+- Session state persists: endpoints visited, methods used, detection flags
+- Allows building behavioral profile over multiple requests
+
+### Honey Tokens
+
+The system generates fake credentials that trigger alerts when used:
+- API keys: `sk_live_*`, `sk_test_*`
+- AWS keys: `AKIAIOSFODNN7EXAMPLE`
+- GitHub tokens: `ghp_*`
+- JWTs with fake admin payloads
+
+When a honey token is detected in any request (headers, body, query), the session is flagged.
+
+## Database Schema (v2)
+
+Two main tables in `supabase-schema-v2.sql`:
+
+### `sessions` table
+Tracks visitor sessions with behavioral flags and classification:
+- `id`, `ip`, `user_agent`, `start_time`, `last_activity`
+- `request_count`, `endpoints_called`, `methods_used`
+- Detection flags: `looked_at_docs`, `tried_openapi`, `tried_admin`, `systematic_probing`, `sql_injection_attempted`, `used_honey_token`
+- `agent_likeness_score`, `classification`, `classification_reasons`
+
+### `requests` table
+Individual request logs with full metadata:
+- `session_id`, `timestamp`, `ip`, `user_agent`
+- `method`, `path`, `query_params`, `body`, `headers`
+- `response_status`, `response_time_ms`
+- `api_key_status`, `sql_injection_detected`, `bot_user_agent_detected`
+- `technique_id` (MITRE mapping)
+
+### `honey_tokens` table
+Tracks fake credentials and their usage:
+- `token_type`, `token_value`, `triggered`, `triggered_at`, `triggered_by_ip`
+
+## MITRE ATT&CK Mapping
+
+Detection results are mapped to MITRE techniques:
+- **T1552** (Unsecured Credentials): Correct API key or honey token used
+- **T1110** (Brute Force): Incorrect API key attempts
+- **T1190** (Exploit Public-Facing Application): SQL injection or general probing
+
+## Environment Variables
 
 Required in `.env.local`:
 ```
@@ -83,35 +165,36 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 **Note**: The Supabase client uses the service role key (not anon key) to bypass Row Level Security for server-side logging.
 
-### Path Aliases
+## API Route Handling
 
-TypeScript is configured with `@/*` alias pointing to the root directory:
-```typescript
-import { supabase } from '@/lib/supabase';
+The catch-all route at `app/api/[...slug]/route.ts` handles ALL HTTP methods (GET, POST, PUT, PATCH, DELETE, OPTIONS). Each request:
+
+1. Extracts full metadata (IP, UA, path, query, body, headers)
+2. Checks for API keys in headers
+3. Analyzes request with `analyzeRequest()` from `lib/detection.ts`
+4. Logs session and request data to Supabase
+5. Returns realistic responses to maintain honeypot believability
+
+Console output shows real-time detection:
+```
+[Detection] Session: a1b2c3d4... | Score: 65 | Class: scraper | Reasons: docs_first, admin_probing
+[Detection] SQL injection detected from 192.168.1.1
+[Detection] HONEY TOKEN TRIGGERED from 10.0.0.5!
 ```
 
-## Key Implementation Details
+## Key Files
 
-### API Route Handling
-The catch-all route at `app/api/[...slug]/route.ts` handles ALL HTTP methods (GET, POST, PUT, PATCH, DELETE). Each method:
-1. Extracts the path from the `slug` parameter
-2. Validates API keys via `checkApiKey()`
-3. Logs the attempt via `logHoneypotTrigger()`
-4. Returns realistic-looking responses to maintain honeypot believability
-
-### MITRE ATT&CK Mapping
-`lib/honeypot-utils.ts` maps vulnerability types to MITRE techniques:
-- **T1078** (Valid Accounts): Correct API key usage
-- **T1552** (Unsecured Credentials): Incorrect API key attempts
-- **T1190** (Exploit Public-Facing Application): No API key attempts
-
-### Session Tracking
-Sessions are tracked using `session_id` generated from IP address and timestamp. This allows correlation of multiple requests from the same attacker.
+| File | Purpose |
+|------|---------|
+| `lib/detection.ts` | Core detection engine - scoring, classification, analysis |
+| `lib/honeypot-config.ts` | Fake API key bait |
+| `app/api/[...slug]/route.ts` | Catch-all API honeypot with detection integration |
+| `supabase-schema-v2.sql` | Enhanced database schema for detection data |
 
 ## Important Notes
 
 - The API key in `lib/honeypot-config.ts` is intentionally fake and exposed as bait
 - All `/api/*` routes are honeypots - they don't perform real operations
-- The main website content is in `app/page.tsx` and is publicly accessible
-- Supabase logging is asynchronous and failures are logged to console but don't block responses
-- IP addresses are extracted from `x-forwarded-for` or `x-real-ip` headers (common in production proxies)
+- Detection is async and non-blocking - responses are fast
+- Sessions persist across requests for behavioral profiling
+- Honey tokens in `supabase-schema-v2.sql` are seeded with common fake credential patterns
