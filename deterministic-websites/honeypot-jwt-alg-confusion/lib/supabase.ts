@@ -18,6 +18,7 @@ export interface VulnerabilityLog {
   timestamp?: string;
   attacker_id: string;
   session_id: string;
+  success?: boolean;
 }
 
 /**
