@@ -4,6 +4,7 @@ import { StatsOverview } from '../components/StatsOverview'
 import { KeyMetrics } from '../components/KeyMetrics'
 import { AttackFilters } from '../components/AttackFilters'
 import { SyntheticDataToggle } from '../components/SyntheticDataToggle'
+import MITREAttackMatrix from '../components/MitreMatrix'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { Attack, Stats } from '../types'
 
@@ -92,6 +93,9 @@ export function LiveAttacksPage() {
 
   return (
     <div className="space-y-8">
+      {/* MITRE ATT&CK Matrix at the top */}
+      <MITREAttackMatrix />
+
       {/* Synthetic Data Toggle */}
       <div className="flex justify-end">
         <SyntheticDataToggle 

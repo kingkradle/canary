@@ -1,7 +1,8 @@
 """FastAPI main application"""
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from pathlib import Path
 from contextlib import asynccontextmanager
 import uvicorn
 from typing import List, Dict, Any
@@ -110,6 +111,41 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {"message": "AI Cyber Attack Monitoring API"}
+
+@app.get("/api/mitre-campaigns-csv")
+async def get_mitre_campaigns_csv():
+    """Serve the MITRE campaigns CSV file"""
+    try:
+        # Look for CSV in dashboard/backend/data directory (primary location)
+        csv_path = Path(__file__).parent.parent / "data" / "mitre_campaigns_full.csv"
+        
+        if not csv_path.exists():
+            # Fallback: try other possible locations
+            possible_paths = [
+                Path(__file__).parent.parent.parent.parent / "mitre-attack-viz" / "public" / "mitre_campaigns_full.csv",
+                Path(__file__).parent.parent.parent.parent / "data" / "mitre_campaigns_full.csv",
+            ]
+            
+            for path in possible_paths:
+                if path.exists():
+                    csv_path = path
+                    break
+        
+        if not csv_path.exists():
+            raise HTTPException(
+                status_code=404, 
+                detail=f"MITRE campaigns CSV file not found at: {csv_path}"
+            )
+        
+        return FileResponse(
+            path=str(csv_path),
+            media_type="text/csv",
+            filename="mitre_campaigns_full.csv"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving CSV file: {str(e)}")
 
 @app.get("/api/attacks", response_model=List[AttackResponse])
 async def get_attacks(limit: int = 100, offset: int = 0, include_synthetic: bool = False):
