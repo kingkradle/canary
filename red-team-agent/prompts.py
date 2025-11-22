@@ -17,16 +17,26 @@ Available tool categories:
 Required steps:
 1. First, use scan_website to check basic information and headers
 2. Use analyze_headers to check for security header misconfigurations
-3. Use check_admin_endpoints to test for authentication bypass vulnerabilities
-4. Use discover_api_endpoints and enumerate_directories to find hidden endpoints and files
-5. Use test_sql_injection and test_xss on any forms or parameters you discover
-6. Use test_http_methods to check for dangerous HTTP methods (PUT, DELETE, etc.)
-7. Use check_information_disclosure to look for exposed sensitive data
-8. Use browser tools (navigate_page, check_page_content, browser_interact) to see the actual rendered page and test client-side vulnerabilities
-9. Use browser_interact with action="navigate" to load pages, action="click" to interact with buttons, action="fill" for forms, action="extract" to get DOM content
-10. Use fuzz_parameters to test specific parameters for unexpected behavior
-11. Use check_csrf_protection to verify forms have CSRF protection
-12. Only then provide your findings based on actual tool results
+3. **CRITICAL: Use check_page_content to see the actual rendered page and find forms, input fields, and API endpoints**
+4. **When you find forms or input fields, extract the form action URLs and test those endpoints**
+5. **For any discovered API endpoints (especially /api/* paths), ALWAYS test them with test_sql_injection using POST method if they accept POST requests**
+6. Use discover_api_endpoints to find common API paths, then test each discovered endpoint
+7. Use check_admin_endpoints to test for authentication bypass vulnerabilities
+8. Use enumerate_directories to find hidden endpoints and files
+9. **For SQL injection testing: test_sql_injection supports both GET (query params) and POST (JSON body) - use method="auto" or method="POST" for API endpoints**
+10. Use test_xss on any forms or parameters you discover
+11. Use test_http_methods to check for dangerous HTTP methods (PUT, DELETE, etc.)
+12. Use check_information_disclosure to look for exposed sensitive data
+13. Use browser_interact with action="navigate" to load pages, action="click" to interact with buttons, action="fill" for forms, action="extract" to get DOM content
+14. Use fuzz_parameters to test specific parameters for unexpected behavior
+15. Use check_csrf_protection to verify forms have CSRF protection
+16. Only then provide your findings based on actual tool results
+
+IMPORTANT FOR SQL INJECTION TESTING:
+- If you find a search form or user input field, the form likely posts to an API endpoint (e.g., /api/search, /api/users, /api/query)
+- Always test discovered API endpoints with test_sql_injection(url="http://target/api/endpoint", method="POST")
+- The test_sql_injection tool will automatically test common parameter names like "username", "id", "search", "query"
+- Look for endpoints that accept user input - these are prime targets for SQL injection
 
 Vulnerability testing tools:
 - test_sql_injection: Test URLs/parameters for SQL injection vulnerabilities
@@ -78,7 +88,16 @@ def get_default_task_prompt(website_url: str) -> str:
 
 MANDATORY: You MUST use tools to test the website. Start by:
 1. Use scan_website tool on {website_url}
-2. Only report findings based on actual tool results
+2. Use check_page_content to see the actual page and find forms/input fields
+3. For any forms or search functionality found, identify the API endpoint they use (e.g., /api/search, /api/users)
+4. Test discovered API endpoints with test_sql_injection using POST method (e.g., test_sql_injection(url="{website_url}/api/search", method="POST"))
+5. Use discover_api_endpoints to find common API paths, then test each with test_sql_injection
+6. Only report findings based on actual tool results
+
+CRITICAL: If you find a search form, user input field, or any form that accepts user data, you MUST:
+- Identify the endpoint it posts to (check form action or network requests)
+- Test that endpoint with test_sql_injection using POST method
+- Test with common parameter names like "username", "id", "search", "query"
 
 After using tools, provide a CONCISE report with these sections:
 

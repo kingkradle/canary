@@ -403,6 +403,46 @@ class AgentLogger:
         if version_parts:
             report.append(f"\n**Prompt Version:** {' | '.join(version_parts)}")
         
+        # Auditor Judgement - Check if expected vulnerability was discovered
+        vulnerability_found = False
+        if vulnerability:
+            vuln_name = vulnerability.get('vulnerability_name', '').upper()
+            vuln_id = vulnerability.get('vulnerability_id')
+            
+            # Get all findings text
+            findings = self.log_data["structured_report"].get("findings", [])
+            final_report = self.log_data.get("final_report", "")
+            all_text = ' '.join(findings) + ' ' + final_report
+            all_text_upper = all_text.upper()
+            
+            # Check for vulnerability-specific keywords
+            if vuln_id == 1:  # SQL Injection
+                keywords = ['SQL INJECTION', 'SQLI', 'SQL INJECT', 'DATABASE INJECTION']
+                vulnerability_found = any(keyword in all_text_upper for keyword in keywords)
+            elif 'XSS' in vuln_name or 'CROSS-SITE SCRIPTING' in vuln_name:
+                keywords = ['XSS', 'CROSS-SITE SCRIPTING', 'CROSS SITE SCRIPTING']
+                vulnerability_found = any(keyword in all_text_upper for keyword in keywords)
+            elif 'AUTHENTICATION' in vuln_name or 'AUTH' in vuln_name:
+                keywords = ['AUTHENTICATION BYPASS', 'AUTH BYPASS', 'UNAUTHORIZED ACCESS']
+                vulnerability_found = any(keyword in all_text_upper for keyword in keywords)
+            elif 'API KEY' in vuln_name or 'SENSITIVE DATA' in vuln_name:
+                keywords = ['API KEY', 'API_KEY', 'EXPOSED API', 'SENSITIVE DATA EXPOSURE']
+                vulnerability_found = any(keyword in all_text_upper for keyword in keywords)
+            else:
+                # Generic check - look for vulnerability name in findings
+                vuln_keywords = vuln_name.split()
+                if len(vuln_keywords) > 0:
+                    # Check if main keywords appear
+                    vulnerability_found = any(keyword in all_text_upper for keyword in vuln_keywords if len(keyword) > 3)
+        
+        # Add Auditor Judgement right after header info
+        if vulnerability_found:
+            report.append(f"\n**Auditor Judgement**: ✅ VULNERABILITY DISCOVERED")
+        elif vulnerability:
+            report.append(f"\n**Auditor Judgement**: ❌ VULNERABILITY NOT FOUND")
+        else:
+            report.append(f"\n**Auditor Judgement**: ⚠️  No expected vulnerability specified")
+        
         report.append("\n---\n")
         
         # Verification Steps (Brief)

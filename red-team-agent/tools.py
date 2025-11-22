@@ -414,19 +414,22 @@ def get_browser_use_tools():
 
 
 @tool
-def test_sql_injection(url: str, parameter: Optional[str] = None) -> str:
+def test_sql_injection(url: str, parameter: Optional[str] = None, method: str = "auto") -> str:
     """
     Test a URL or endpoint for SQL injection vulnerabilities.
-    Tests common SQL injection payloads and checks for error messages or unusual responses.
+    Tests common SQL injection payloads via GET (query params) and POST (JSON body).
+    Checks for error messages, unusual responses, or successful injection indicators.
     
     Args:
         url: The URL to test (can include query parameters)
-        parameter: Optional specific parameter name to test (if not provided, tests all parameters)
+        parameter: Optional specific parameter name to test (if not provided, tests common parameter names)
+        method: HTTP method to use - "GET", "POST", or "auto" (tries both)
     
     Returns:
         String containing SQL injection test results
     """
     from urllib.parse import urlparse, parse_qs, urlencode
+    import json
     
     # Common SQL injection payloads
     sql_payloads = [
@@ -450,54 +453,147 @@ def test_sql_injection(url: str, parameter: Optional[str] = None) -> str:
     results = []
     vulnerable = []
     
-    # If no parameters in URL, test common parameter names
-    if not query_params and not parameter:
-        test_params = ['id', 'user', 'username', 'email', 'search', 'q', 'query']
-        for param in test_params:
-            query_params[param] = ['test']
+    # Determine which methods to test
+    methods_to_test = []
+    if method == "auto":
+        methods_to_test = ["GET", "POST"]
+    else:
+        methods_to_test = [method.upper()]
     
-    # Test each parameter
-    params_to_test = [parameter] if parameter else list(query_params.keys())
+    # Common parameter names to test if none provided
+    if not parameter:
+        test_params = ['id', 'user', 'username', 'email', 'search', 'q', 'query', 'name', 'input']
+    else:
+        test_params = [parameter]
     
-    for param in params_to_test:
-        if not param:
-            continue
-            
-        for payload in sql_payloads[:5]:  # Test first 5 payloads to avoid too many requests
-            test_params = query_params.copy()
-            test_params[param] = [payload]
-            test_url = f"{base_url}?{urlencode(test_params, doseq=True)}"
-            
-            try:
-                response = requests.get(test_url, timeout=config.REQUEST_TIMEOUT)
+    # Test GET requests (query parameters)
+    if "GET" in methods_to_test:
+        # If no parameters in URL, test common parameter names
+        if not query_params:
+            for param in test_params:
+                query_params[param] = ['test']
+        
+        # Test each parameter
+        params_to_test = list(query_params.keys()) if query_params else test_params
+        
+        for param in params_to_test:
+            if not param:
+                continue
                 
-                # Check for SQL error indicators
-                sql_errors = [
-                    'sql syntax', 'mysql', 'postgresql', 'oracle', 'sqlite',
-                    'sql error', 'database error', 'query failed',
-                    'unclosed quotation', 'syntax error'
-                ]
+            for payload in sql_payloads[:5]:  # Test first 5 payloads
+                test_params_dict = query_params.copy() if query_params else {}
+                test_params_dict[param] = [payload]
+                test_url = f"{base_url}?{urlencode(test_params_dict, doseq=True)}"
                 
-                response_lower = response.text.lower()
-                found_errors = [err for err in sql_errors if err in response_lower]
-                
-                if found_errors:
-                    vulnerable.append(f"{param} with payload '{payload}': Found SQL error indicators: {', '.join(found_errors)}")
-                
-                # Check for unusual status codes or response length changes
-                if response.status_code == 500:
-                    results.append(f"{param} with payload '{payload}': Status 500 (possible SQL error)")
+                try:
+                    response = requests.get(test_url, timeout=config.REQUEST_TIMEOUT)
                     
-            except requests.exceptions.RequestException as e:
-                results.append(f"{param} with payload '{payload}': Error - {str(e)}")
+                    # Check for SQL error indicators
+                    sql_errors = [
+                        'sql syntax', 'mysql', 'postgresql', 'oracle', 'sqlite',
+                        'sql error', 'database error', 'query failed',
+                        'unclosed quotation', 'syntax error'
+                    ]
+                    
+                    response_lower = response.text.lower()
+                    found_errors = [err for err in sql_errors if err in response_lower]
+                    
+                    # Check for successful injection indicators
+                    response_json = None
+                    try:
+                        response_json = response.json()
+                    except:
+                        pass
+                    
+                    # Check if response indicates successful SQL injection
+                    injection_indicators = [
+                        'sql injection', 'injection detected', 'injection successful',
+                        'returned', 'records', 'query:', 'SELECT'
+                    ]
+                    found_indicators = [ind for ind in injection_indicators if ind in response_lower]
+                    
+                    if found_errors:
+                        vulnerable.append(f"GET {param} with payload '{payload}': Found SQL error indicators: {', '.join(found_errors)}")
+                    elif found_indicators or (response_json and isinstance(response_json, dict) and 'warning' in response_json):
+                        vulnerable.append(f"GET {param} with payload '{payload}': SQL injection successful - {', '.join(found_indicators) if found_indicators else 'injection detected in response'}")
+                    elif response.status_code == 500:
+                        results.append(f"GET {param} with payload '{payload}': Status 500 (possible SQL error)")
+                        
+                except requests.exceptions.RequestException as e:
+                    results.append(f"GET {param} with payload '{payload}': Error - {str(e)}")
+    
+    # Test POST requests (JSON body)
+    if "POST" in methods_to_test:
+        for param in test_params:
+            for payload in sql_payloads[:5]:  # Test first 5 payloads
+                try:
+                    # Try JSON body
+                    json_body = {param: payload}
+                    response = requests.post(
+                        base_url,
+                        json=json_body,
+                        headers={'Content-Type': 'application/json'},
+                        timeout=config.REQUEST_TIMEOUT
+                    )
+                    
+                    # Check for SQL error indicators
+                    sql_errors = [
+                        'sql syntax', 'mysql', 'postgresql', 'oracle', 'sqlite',
+                        'sql error', 'database error', 'query failed',
+                        'unclosed quotation', 'syntax error'
+                    ]
+                    
+                    response_lower = response.text.lower()
+                    found_errors = [err for err in sql_errors if err in response_lower]
+                    
+                    # Check for successful injection indicators
+                    response_json = None
+                    try:
+                        response_json = response.json()
+                    except:
+                        pass
+                    
+                    # Check if response indicates successful SQL injection
+                    injection_indicators = [
+                        'sql injection', 'injection detected', 'injection successful',
+                        'returned', 'records', 'query:', 'SELECT', 'warning'
+                    ]
+                    found_indicators = [ind for ind in injection_indicators if ind in response_lower]
+                    
+                    # Check response structure for injection success
+                    is_vulnerable = False
+                    if response_json and isinstance(response_json, dict):
+                        # Check for indicators in JSON response
+                        if 'warning' in response_json and 'injection' in str(response_json.get('warning', '')).lower():
+                            is_vulnerable = True
+                        elif 'query' in response_json and 'SELECT' in str(response_json.get('query', '')):
+                            # Check if query shows injection pattern
+                            query_str = str(response_json.get('query', ''))
+                            if "' OR" in query_str or "OR '1'='1" in query_str:
+                                is_vulnerable = True
+                        elif 'results' in response_json and isinstance(response_json.get('results'), list):
+                            # If we get multiple results from a simple payload, might be injection
+                            if len(response_json.get('results', [])) > 1 and payload in ["' OR '1'='1", "' OR 1=1--"]:
+                                is_vulnerable = True
+                    
+                    if found_errors:
+                        vulnerable.append(f"POST {param} (JSON) with payload '{payload}': Found SQL error indicators: {', '.join(found_errors)}")
+                    elif is_vulnerable or found_indicators:
+                        vulnerable.append(f"POST {param} (JSON) with payload '{payload}': SQL injection successful - detected in response")
+                    elif response.status_code == 500:
+                        results.append(f"POST {param} (JSON) with payload '{payload}': Status 500 (possible SQL error)")
+                        
+                except requests.exceptions.RequestException as e:
+                    results.append(f"POST {param} (JSON) with payload '{payload}': Error - {str(e)}")
     
     output = []
     if vulnerable:
-        output.append("⚠️ POTENTIAL SQL INJECTION VULNERABILITIES:")
+        output.append("🚨 SQL INJECTION VULNERABILITIES FOUND:")
         output.extend(vulnerable)
         output.append("")
-    output.append("SQL Injection Test Results:")
-    output.extend(results[:10])  # Limit output
+    if results:
+        output.append("SQL Injection Test Results:")
+        output.extend(results[:10])  # Limit output
     
     return "\n".join(output) if output else "No SQL injection vulnerabilities detected in initial tests."
 
@@ -603,6 +699,11 @@ def discover_api_endpoints(base_url: str) -> str:
         '/api/auth',
         '/api/admin',
         '/api/data',
+        '/api/search',
+        '/api/query',
+        '/api/login',
+        '/api/register',
+        '/api/user',
         '/rest',
         '/rest/api',
         '/graphql',
