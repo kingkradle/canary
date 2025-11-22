@@ -37,6 +37,37 @@ export function checkApiKey(headers: Headers): ApiKeyCheckResult {
 }
 
 /**
+ * Map vulnerability types to MITRE ATT&CK technique IDs
+ */
+function getTechniqueId(vulnerabilityType: string): string {
+  // T1552: Unsecured Credentials - using credentials found in code/documentation
+  // T1190: Exploit Public-Facing Application - attempting to access admin endpoints without auth
+  // T1110: Brute Force - trying incorrect/random API keys
+
+  if (vulnerabilityType === 'admin-page-access-correct-api-key') {
+    return 'T1552'; // Unsecured Credentials - found the API key somewhere
+  } else if (vulnerabilityType === 'admin-page-access-incorrect-api-key') {
+    return 'T1110'; // Brute Force - trying random/incorrect keys
+  } else {
+    return 'T1190'; // Exploit Public-Facing Application - no authentication attempt
+  }
+}
+
+/**
+ * Generate a session ID from request headers
+ */
+function getSessionId(request: Request): string {
+  // Use IP address and timestamp for session tracking
+  const ip = request.headers.get('x-forwarded-for') ||
+             request.headers.get('x-real-ip') ||
+             'unknown';
+
+  // Create a simple hash-like session ID
+  const timestamp = Date.now();
+  return `${ip.split(',')[0]}_${timestamp}`;
+}
+
+/**
  * Log honeypot trigger to Supabase database
  */
 export async function logHoneypotTrigger(
@@ -45,7 +76,6 @@ export async function logHoneypotTrigger(
   route?: string
 ) {
   const url = new URL(request.url);
-  const path = route || url.pathname;
 
   // Map the result status to specific vulnerability types
   const vulnerabilityType =
@@ -55,26 +85,42 @@ export async function logHoneypotTrigger(
       ? 'admin-page-access-correct-api-key'
       : 'admin-page-access-incorrect-api-key';
 
-  // Extract attack_id (IP address or other identifier)
-  const attackId =
-    request.headers.get('x-forwarded-for') ||
+  // Extract attacker_id (IP address or other identifier)
+  const attackerId =
+    request.headers.get('x-forwarded-for')?.split(',')[0] ||
     request.headers.get('x-real-ip') ||
     'unknown';
 
+  // Get session ID for tracking
+  const sessionId = getSessionId(request);
+
+  // Get appropriate MITRE ATT&CK technique ID
+  const techniqueId = getTechniqueId(vulnerabilityType);
+
+  const payload = {
+    base_url: url.origin,
+    vulnerability_type: vulnerabilityType,
+    technique_id: techniqueId,
+    attacker_id: attackerId,
+    session_id: sessionId,
+  };
+
+  console.log('[Honeypot] Attempting to log to Supabase:', payload);
+  console.log('[Honeypot] Supabase URL configured:', !!process.env.SUPABASE_URL);
+  console.log('[Honeypot] Supabase key configured:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('vulnerability_logs')
-      .insert({
-        base_url: url.origin,
-        path: path,
-        vulnerability_type: vulnerabilityType,
-        attack_id: attackId,
-      });
+      .insert(payload);
 
     if (error) {
-      console.error('Failed to log to Supabase:', error);
+      console.error('[Honeypot] Failed to log to Supabase:', error);
+      console.error('[Honeypot] Error details:', JSON.stringify(error, null, 2));
+    } else {
+      console.log('[Honeypot] Successfully logged to Supabase:', data);
     }
   } catch (err) {
-    console.error('Error logging honeypot trigger:', err);
+    console.error('[Honeypot] Exception while logging:', err);
   }
 }
