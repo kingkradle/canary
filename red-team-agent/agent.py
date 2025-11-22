@@ -192,7 +192,8 @@ class RedTeamAgent:
         return {
             "output": final_output,
             "report_file": str(report_file),
-            "structured": self.logger.log_data["structured_report"]
+            "structured": self.logger.log_data["structured_report"],
+            "run_id": self.logger.run_id
         }
 
 
