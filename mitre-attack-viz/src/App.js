@@ -3,6 +3,8 @@ import './App.css';
 
 const MITREAttackVisualization = () => {
   const [techniques, setTechniques] = useState({});
+  const [attacks, setAttacks] = useState({}); // Map of attack_id -> array of aml_ids (preserving sequence)
+  const [selectedAttackId, setSelectedAttackId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -60,13 +62,82 @@ const MITREAttackVisualization = () => {
     "Impact": "TA0040"
   };
 
+  // Parse CSV data and group by attack_id, preserving sequence
+  const parseCSV = (csvText) => {
+    const lines = csvText.trim().split('\n');
+    if (lines.length < 2) {
+      throw new Error('CSV file is empty or has no data rows');
+    }
+    
+    // Parse header row
+    const headers = lines[0].split(',').map(h => h.trim());
+    const attackIdIndex = headers.indexOf('attack_id');
+    const amlIdIndex = headers.indexOf('aml_id');
+    
+    if (attackIdIndex === -1) {
+      throw new Error('attack_id column not found in CSV');
+    }
+    if (amlIdIndex === -1) {
+      throw new Error('aml_id column not found in CSV');
+    }
+    
+    // Group by attack_id, preserving sequence
+    const attacksMap = {};
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line && !line.startsWith('created_at')) { // Skip header rows that might appear in middle
+        const values = line.split(',').map(v => v.trim());
+        const attackId = values[attackIdIndex];
+        const amlId = values[amlIdIndex];
+        
+        if (attackId && amlId && amlId.startsWith('T')) {
+          if (!attacksMap[attackId]) {
+            attacksMap[attackId] = [];
+          }
+          attacksMap[attackId].push(amlId);
+        }
+      }
+    }
+    
+    return attacksMap;
+  };
+
+  // Fetch attack mapping CSV
+  const fetchAttackMapping = async () => {
+    try {
+      const response = await fetch('/mitre_campaigns_full.csv');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch attack mapping: ${response.statusText}`);
+      }
+      const csvText = await response.text();
+      const attacksMap = parseCSV(csvText);
+      console.log('Loaded attacks:', Object.keys(attacksMap).length, 'campaigns');
+      setAttacks(attacksMap);
+      
+      // Set first attack as default if no attack is selected
+      const attackIds = Object.keys(attacksMap);
+      if (attackIds.length > 0) {
+        setSelectedAttackId(prev => prev || attackIds[0]);
+        console.log('Default attack selected:', attackIds[0]);
+      }
+    } catch (err) {
+      console.error('Error loading attack mapping CSV:', err);
+      // Continue without attack mapping if CSV fails to load
+      setAttacks({});
+    }
+  };
+
   useEffect(() => {
     const fetchMitreData = async () => {
       try {
-        const response = await fetch(
+        // Fetch attack mapping CSV first
+        await fetchAttackMapping();
+        
+        // Fetch MITRE ATT&CK data
+        const mitreResponse = await fetch(
           'https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json'
         );
-        const json = await response.json();
+        const json = await mitreResponse.json();
         
         // First, build a map of tactic shortnames to full names from the JSON
         const tacticShortnameToName = {};
@@ -142,6 +213,14 @@ const MITREAttackVisualization = () => {
     return techniques;
   }, [techniques]);
 
+  // Get the selected attack's techniques as a Set for fast lookup
+  const selectedAttackTechniques = useMemo(() => {
+    if (!selectedAttackId || !attacks[selectedAttackId]) {
+      return new Set();
+    }
+    return new Set(attacks[selectedAttackId]);
+  }, [selectedAttackId, attacks]);
+
   if (loading) {
     return (
       <div className="matrix-container">
@@ -158,12 +237,35 @@ const MITREAttackVisualization = () => {
     );
   }
 
+  const attackIds = Object.keys(attacks).sort();
+
   return (
     <div className="matrix-container">
       <div className="matrix-header">
         <h1 className="matrix-title">Project Canary</h1>
         <p className="matrix-subtitle">Intelligence gathering on agentic adversary attack vectors. Open source knowledge base of adversary TTPs based on real-world observations on our fleet of honeypot websites</p>
       </div>
+      
+      {attackIds.length > 0 && (
+        <div className="attack-selector">
+          <label htmlFor="attack-select" className="attack-select-label">
+            Select Attack Campaign:
+          </label>
+          <select
+            id="attack-select"
+            value={selectedAttackId}
+            onChange={(e) => setSelectedAttackId(e.target.value)}
+            className="attack-select"
+          >
+            {attackIds.map(attackId => (
+              <option key={attackId} value={attackId}>
+                {attackId} ({attacks[attackId].length} techniques)
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      
       <div className="matrix-table">
         <table>
           <thead>
@@ -183,19 +285,27 @@ const MITREAttackVisualization = () => {
                 const tacticTechniques = tacticGroups[tactic] || [];
                 return (
                   <td key={tactic} className="tactic-column">
-                    {tacticTechniques.map(technique => (
-                      <div key={technique.aml_id} className="technique-cell">
-                        <a 
-                          href={`https://attack.mitre.org/techniques/${technique.aml_id}/`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="technique-link"
+                    {tacticTechniques.map(technique => {
+                      const isInAttack = selectedAttackTechniques.has(technique.aml_id);
+                      return (
+                        <div 
+                          key={technique.aml_id} 
+                          className={`technique-cell ${isInAttack ? 'attack-technique' : ''}`}
                         >
-                          <span className="technique-name">{technique.name}</span>
-                          <span className="technique-id">{technique.aml_id}</span>
-                        </a>
-                      </div>
-                    ))}
+                          <a 
+                            href={`https://attack.mitre.org/techniques/${technique.aml_id}/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="technique-link"
+                          >
+                            <span className={`technique-name ${isInAttack ? 'attack-name' : ''}`}>
+                              {technique.name}
+                            </span>
+                            <span className="technique-id">{technique.aml_id}</span>
+                          </a>
+                        </div>
+                      );
+                    })}
                   </td>
                 );
               })}
