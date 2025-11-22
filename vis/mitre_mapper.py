@@ -1,118 +1,153 @@
-#!/usr/bin/env python3
-"""
-MITRE ATT&CK Campaign Mapper
-Maps campaign techniques to CSV format for ML workflows
-"""
-
-import csv
-import re
 import requests
-from datetime import datetime
 from bs4 import BeautifulSoup
+import csv
+from datetime import datetime
 import uuid
+import time
 
-class MITRECampaignMapper:
-    def __init__(self, campaign_url):
-        self.campaign_url = campaign_url
-        self.campaign_id = self._extract_campaign_id(campaign_url)
-        self.techniques = []
-        
-    def _extract_campaign_id(self, url):
-        """Extract campaign ID from URL (e.g., C0017)"""
-        match = re.search(r'C\d+', url)
-        return match.group(0) if match else None
+def extract_all_campaigns():
+    """
+    Extracts all campaigns from MITRE ATT&CK campaigns page
+    """
+    base_url = "https://attack.mitre.org"
+    campaigns_url = f"{base_url}/campaigns/"
     
-    def fetch_campaign_data(self):
-        """Fetch and parse campaign page"""
-        response = requests.get(self.campaign_url)
+    print(f"Fetching campaigns from {campaigns_url}...")
+    
+    # Get the main campaigns page
+    response = requests.get(campaigns_url)
+    response.raise_for_status()
+    
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    # Find all campaign links in the table
+    campaigns = []
+    
+    # Look for the campaigns table
+    table = soup.find('table', {'class': 'table-techniques'})
+    
+    if not table:
+        # Try alternative selectors
+        table = soup.find('table')
+    
+    if table:
+        rows = table.find_all('tr')[1:]  # Skip header row
+        
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 2:
+                # Extract campaign ID and name
+                campaign_link = cols[0].find('a')
+                if campaign_link:
+                    campaign_id = campaign_link.text.strip()
+                    campaign_url = base_url + campaign_link['href']
+                    campaign_name = cols[1].text.strip() if len(cols) > 1 else ""
+                    
+                    campaigns.append({
+                        'id': campaign_id,
+                        'name': campaign_name,
+                        'url': campaign_url
+                    })
+                    print(f"Found: {campaign_id} - {campaign_name}")
+    
+    print(f"\nTotal campaigns found: {len(campaigns)}")
+    return campaigns
+
+def extract_techniques_for_campaign(campaign_url, campaign_id):
+    """
+    Extracts all techniques (TTPs) for a specific campaign
+    """
+    print(f"\nExtracting techniques for {campaign_id}...")
+    
+    try:
+        response = requests.get(campaign_url)
+        response.raise_for_status()
+        
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Find all technique links in the page
-        technique_links = soup.find_all('a', href=re.compile(r'/techniques/T\d+'))
+        techniques = []
         
-        seen_techniques = set()
-        for link in technique_links:
-            href = link.get('href')
-            # Extract technique ID (e.g., T1071, T1071.001)
-            match = re.search(r'T\d+(?:\.\d+)?', href)
-            if match:
-                technique_id = match.group(0)
-                if technique_id not in seen_techniques:
-                    seen_techniques.add(technique_id)
-                    self.techniques.append({
-                        'technique_id': technique_id,
-                        'technique_name': link.text.strip(),
-                        'url': f"https://attack.mitre.org{href}"
-                    })
+        # Find the techniques table
+        # Look for table with techniques
+        tables = soup.find_all('table')
         
-        return self.techniques
-    
-    def generate_csv_data(self, output_file='attack_mapping.csv'):
-        """Generate CSV with the specified structure"""
+        for table in tables:
+            # Check if this is the techniques table
+            header = table.find('thead')
+            if header and ('Technique' in header.text or 'ID' in header.text):
+                rows = table.find_all('tr')[1:]  # Skip header
+                
+                for row in rows:
+                    cols = row.find_all('td')
+                    if cols:
+                        # Try to find technique ID
+                        technique_link = row.find('a', href=lambda x: x and '/techniques/' in x)
+                        if technique_link:
+                            technique_id = technique_link.text.strip()
+                            techniques.append(technique_id)
         
-        if not self.techniques:
-            self.fetch_campaign_data()
+        # Remove duplicates
+        techniques = list(set(techniques))
+        print(f"Found {len(techniques)} techniques for {campaign_id}")
         
-        rows = []
-        base_timestamp = datetime.now()
+        return techniques
         
-        for idx, technique in enumerate(self.techniques):
-            # Generate unique session_id for this analysis
-            session_id = str(uuid.uuid4())
-            
-            row = {
-                'created_at': base_timestamp.isoformat(),
-                'attack_id': self.campaign_id,  # Campaign ID (C0017)
-                'aml_id': technique['technique_id'],  # MITRE ATT&CK Technique ID
-                'base_url': self.campaign_url,
-                'session_id': session_id
-            }
-            rows.append(row)
-        
-        # Write to CSV
-        with open(output_file, 'w', newline='') as csvfile:
-            fieldnames = ['created_at', 'attack_id', 'aml_id', 'base_url', 'session_id']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            writer.writeheader()
-            writer.writerows(rows)
-        
-        print(f"✓ Generated {len(rows)} rows in {output_file}")
-        return rows
-    
-    def print_summary(self):
-        """Print summary of extracted techniques"""
-        print(f"\nCampaign: {self.campaign_id}")
-        print(f"Total Techniques: {len(self.techniques)}\n")
-        print("Extracted Techniques:")
-        print("-" * 80)
-        for tech in sorted(self.techniques, key=lambda x: x['technique_id']):
-            print(f"{tech['technique_id']:12} {tech['technique_name']}")
-        print("-" * 80)
-
+    except Exception as e:
+        print(f"Error extracting techniques for {campaign_id}: {e}")
+        return []
 
 def main():
-    # Initialize mapper with C0017 campaign
-    campaign_url = "https://attack.mitre.org/campaigns/C0017/"
+    # Extract all campaigns
+    campaigns = extract_all_campaigns()
     
-    print("MITRE ATT&CK Campaign Mapper")
-    print("=" * 80)
+    # Prepare CSV data
+    csv_data = []
     
-    mapper = MITRECampaignMapper(campaign_url)
+    # For each campaign, extract techniques
+    for i, campaign in enumerate(campaigns, 1):
+        print(f"\n[{i}/{len(campaigns)}] Processing {campaign['id']}...")
+        
+        techniques = extract_techniques_for_campaign(campaign['url'], campaign['id'])
+        
+        # Create CSV rows
+        timestamp = datetime.now().isoformat()
+        
+        if techniques:
+            for technique in techniques:
+                csv_data.append({
+                    'created_at': timestamp,
+                    'attack_id': campaign['id'],
+                    'aml_id': technique,
+                    'base_url': campaign['url'],
+                    'session_id': str(uuid.uuid4())
+                })
+        else:
+            # Even if no techniques found, add campaign entry
+            csv_data.append({
+                'created_at': timestamp,
+                'attack_id': campaign['id'],
+                'aml_id': '',
+                'base_url': campaign['url'],
+                'session_id': str(uuid.uuid4())
+            })
+        
+        # Be respectful - add a small delay between requests
+        if i < len(campaigns):
+            time.sleep(1)
     
-    # Fetch campaign data
-    print(f"\nFetching data from: {campaign_url}")
-    mapper.fetch_campaign_data()
+    # Write to CSV
+    output_file = 'mitre_campaigns_full.csv'
     
-    # Print summary
-    mapper.print_summary()
+    with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        fieldnames = ['created_at', 'attack_id', 'aml_id', 'base_url', 'session_id']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        writer.writerows(csv_data)
     
-    # Generate CSV
-    print("\nGenerating CSV output...")
-    mapper.generate_csv_data()
-    
-    print("\n✓ Complete! CSV file ready for ML workflow.")
-
+    print(f"\n✓ Data saved to {output_file}")
+    print(f"Total campaigns: {len(campaigns)}")
+    print(f"Total rows: {len(csv_data)}")
 
 if __name__ == "__main__":
     main()
