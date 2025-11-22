@@ -1,36 +1,27 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Vulnerability: JWT Algorithm Confusion.
 
-## Getting Started
+This is intended to be a vulnerability that would require several steps by an attacker. The vulnerability is that the backend will allow both RS256 (asymmetric) and HS256 (symmetric) encryption. If the attacker signs with the public key, their token will be accepted using HS256. We also record attempts to log in with RS256 which will be recorded as brute force.
 
-First, run the development server:
+To run, it requires the following in `.env.local`:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
+```
+JWT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+# Generate with openssl genrsa -out private.key 2048
+-----END RSA PRIVATE KEY-----"
+JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----
+# Generate with openssl rsa -in private.key -pubout -out public.key
+-----END PUBLIC KEY-----"
+# Get from the supabase console
+NEXT_PUBLIC_SUPABASE_URL=""
+SUPABASE_SERVICE_KEY=""
+```
+Then;
+```
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The `attack.py` script demonstrates a successful hack:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+uv run attack.py
+```
