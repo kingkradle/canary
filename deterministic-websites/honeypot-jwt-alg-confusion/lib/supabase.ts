@@ -16,3 +16,20 @@ export interface VulnerabilityLog {
   timestamp?: string;
   attack_id?: string;
 }
+
+/**
+ * Log honeypot trigger to Supabase database
+ */
+export async function logHoneypotTrigger(result: VulnerabilityLog) {
+  try {
+    const { error } = await supabase
+      .from('vulnerability_logs')
+      .insert(result);
+
+    if (error) {
+      console.error('Failed to log to Supabase:', error);
+    }
+  } catch (err) {
+    console.error('Error logging honeypot trigger:', err);
+  }
+}
