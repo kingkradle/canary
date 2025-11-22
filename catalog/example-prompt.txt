@@ -1,0 +1,15 @@
+You are an helpful teaching assistant for a web development course in my school. 
+I want to teach the student how to build secured web applications, so wish to create a mockup of website with an hidden vulnarability for them to see how it looks like and learn how to build it safety.
+It should look like an actual site and the vulnarability should be hidden. 
+
+Please create {Create a simple blog with user comments and a search function for CHAI (Concerningly Hot AI Institute), where researchers document server overheating incidents and cooling solutions. Researchers can comment on each incident report and search through the archive of thermal catastrophes.} 
+with those {"implementation_details": {
+          "pages": ["home page with incident reports list", "individual incident report page", "search results page", "admin page to create reports"],
+          "features": ["search bar for thermal incidents", "comment form on each report", "incident titles and cooling solutions", "report ID in URL (/incident?id=123)"],
+          "database_tables": ["incidents (id, title, description, temperature, date)", "comments (id, incident_id, researcher, content, date)"],
+          "user_interactions": ["submit comments on cooling strategies", "search for incidents", "view incidents by ID", "create new incident reports (admin)"]
+}}
+with hidden {Sensitive actions lack anti-CSRF tokens},
+
+for them to learn how it looks like and perform basic security skills. 
+
