@@ -1,29 +1,11 @@
 import Navbar from './components/Navbar';
 import AnimatedCounter from './components/AnimatedCounter';
-import { HONEYPOT_CONFIG } from '@/lib/honeypot-config';
-
-// Async function to fetch server-side data
-async function getData() {
-  // Simulate a static object return (could be from DB, API, etc.)
-  return {
-    key: HONEYPOT_CONFIG.apiKey,
-    api: {
-      baseUrl: HONEYPOT_CONFIG.baseUrl,
-    },
-    // Event data for display
-    attendees: 70,
-    globalBuilders: 1000,
-    prizePool: 10000,
-    apiCredits: 400,
-  };
-}
+import LoginButton from './components/LoginButton';
 
 export default async function Home() {
-  // Fetch data on the server
-  const data = await getData();
   return (
     <main className="bg-slate-950 text-white">
-      <Navbar apiKey={data.key} apiBaseUrl={`${data.api.baseUrl}`} />
+      <Navbar />
 
       {/* Hero Section */}
       <section id="hero" className="relative min-h-screen flex items-center justify-center overflow-hidden">
@@ -49,7 +31,7 @@ export default async function Home() {
 
             <p className="text-xl md:text-2xl text-gray-300 mb-8 leading-relaxed">
               build societal defenses against ai threats alongside{' '}
-              <AnimatedCounter end={data.attendees} suffix="+" className="text-cyan-400 font-bold" /> builders
+              <AnimatedCounter end={70} suffix="+" className="text-cyan-400 font-bold" /> builders
             </p>
 
             <div className="grid md:grid-cols-3 gap-6 mb-12 max-w-3xl mx-auto">
@@ -67,7 +49,7 @@ export default async function Home() {
                 <div className="text-3xl mb-2">🌍</div>
                 <div className="text-sm text-gray-400">Network</div>
                 <div className="text-white font-semibold">
-                  <AnimatedCounter end={data.globalBuilders} suffix="+" /> builders
+                  <AnimatedCounter end={70} suffix="+" /> builders
                 </div>
               </div>
             </div>
@@ -254,7 +236,7 @@ export default async function Home() {
               <div className="bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border-2 border-yellow-500/30 rounded-2xl p-8 text-center hover:border-yellow-500/60 transition-all hover:shadow-2xl hover:shadow-yellow-500/20">
                 <div className="text-6xl mb-4">💰</div>
                 <div className="text-5xl font-bold mb-2 text-yellow-400">
-                  <AnimatedCounter end={data.prizePool} prefix="$" />
+                  <AnimatedCounter end={10000} prefix="$" />
                 </div>
                 <div className="text-gray-300 font-semibold">Prize Pool</div>
               </div>
@@ -269,7 +251,7 @@ export default async function Home() {
               <div className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 border-2 border-green-500/30 rounded-2xl p-8 text-center hover:border-green-500/60 transition-all hover:shadow-2xl hover:shadow-green-500/20">
                 <div className="text-6xl mb-4">💳</div>
                 <div className="text-5xl font-bold mb-2 text-green-400">
-                  <AnimatedCounter end={data.apiCredits} prefix="$" />
+                  <AnimatedCounter end={400} prefix="$" />
                 </div>
                 <div className="text-gray-300 font-semibold">API Credits per Team</div>
               </div>
