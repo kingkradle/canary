@@ -1,0 +1,7 @@
+langchain
+langchain_openai
+langchain-community
+requests
+python-dotenv
+playwright
+browser-use
